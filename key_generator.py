@@ -50,7 +50,7 @@ def showKeys():
 	privkeyToFile(key, "server_private.pem")
 	
 	path = os.getcwd()
-	print("Current working directory is %s" % path)
+	#print("Current working directory is %s" % path)
 	
 	#reference: 
 	for client in clientList:
@@ -68,12 +68,16 @@ def showKeys():
 			pass
 		
 		os.rename(path + "/" + fnPrivKey, newPath + "/" + fnPrivKey)
-		shutil.copyfile(path + "/server_public.pem", newPath + "/server_public.pem")
+		os.rename(path + "/" + fnPubKey, newPath + "/" + fnPubKey)
 		
-		if client == "client1":
+		#shutil.copyfile(path + "/server_public.pem", newPath + "/server_public.pem")
+		
+		
+		#for testing with client1 and client2
+		if client == "client1" or client == "client2":
 			shutil.copyfile(path + "/server_public.pem", path + "/Client" + "/server_public.pem")
 			shutil.copyfile(newPath + "/" + fnPrivKey, path + "/Client/" + fnPrivKey)	
-	
+			
 #------
 showKeys()
 

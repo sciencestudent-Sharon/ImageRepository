@@ -79,12 +79,6 @@ def client():
 			clientSocket.send(confirmEnc)
 		
 		
-		return
-		
-		
-		
-		
-		
 		menu = clientSocket.recv(2048).decode('ascii')
 		choice = input(menu)
 

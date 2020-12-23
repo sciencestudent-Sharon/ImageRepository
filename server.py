@@ -13,6 +13,7 @@ import sys
 import os
 import os.path
 from os import path
+import shutil
 import json
 import datetime
 from datetime import date 
@@ -78,6 +79,7 @@ def server():
 				loginInfoDec = decryptionPubic(loginInfoEnc)
 
 				(sessionKey, encSymmKey) = verifyClient(loginInfoDec)
+				
 				if (sessionKey == False):
 					verificationMessage = "\nLogin failed.\nPlease try again later."
 					connectionSocket.send(verificationMessage.encode('ascii'))
@@ -85,21 +87,9 @@ def server():
 					return
 				else:
 					connectionSocket.send(encSymmKey)
-					clientConfirmed = connectionSocket.recv(2048)
-					
-					
-					print(clientConfirmed)
-					
-					cipherBlock = setUpAES(sessionKey)
-					clientConfirmedDec = decryptionInit(cipherBlock, clientConfirmed)
-					
-					print(clientConfirmed)
-				
-				
-				return
-				
-				
-				
+					clientConfirmation = connectionSocket.recv(2048)
+					ciphBlock = setUpAES(sessionKey)
+					clientConfirmedDec = decryptionInit(ciphBlock, clientConfirmation)
 				
 				
 				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image(s)\n2) Delete Image(s)\n3) Exit Repository\n"
@@ -344,7 +334,23 @@ def generateSessionKey():
 	return session_key
 
 def getClientPubKey(clientName):
+	path = os.getcwd()
+	newPath = path + "/" + clientName + "/"
+	
+	try:
+		shutil.copyfile(newPath + "/" + clientName + "_public.pem", path + "/" + clientName + "_public.pem")
+	except:
+		print("File cannot be copied or doesn't exist.")
+	
 	pubClientKey = fileHandler(clientName + "_public.pem")
+	
+	
+	try:
+		os.remove(clientName + "_public.pem")
+	except:
+		print("File cannot be removed or doesn't exist.")
+	
+	
 	return pubClientKey
 
 
