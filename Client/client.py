@@ -189,7 +189,7 @@ def client():
 """
 def setUpAES(key):
 	#Generate cipher block
-	cipherBlock = genBlock(Key)
+	cipherBlock = genBlock(key)
 	return cipherBlock
 
 """

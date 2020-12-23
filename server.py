@@ -17,6 +17,8 @@ import json
 import datetime
 from datetime import date 
 from datetime import datetime
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import PKCS1_OAEP
@@ -83,10 +85,15 @@ def server():
 					return
 				else:
 					connectionSocket.send(encSymmKey)
-					clientConfirmed = connectionSocket.recv(2048).decode('ascii')
+					clientConfirmed = connectionSocket.recv(2048)
+					
+					
 					print(clientConfirmed)
-				
-				
+					
+					cipherBlock = setUpAES(sessionKey)
+					clientConfirmedDec = decryptionInit(cipherBlock, clientConfirmed)
+					
+					print(clientConfirmed)
 				
 				
 				return
@@ -167,6 +174,30 @@ def server():
 #=========================================================================================================#
 # LOGIN - FUNCTIONS
 #=========================================================================================================#
+
+#prep for AES encryption
+"""
+	This function, setUpCrypto(), generates an
+	encryption key and cipher block.
+	Parameters: fname - string
+	Returns: (Key, cipherBlock) - tuple
+"""
+def setUpAES(key):
+	#Generate cipher block
+	cipherBlock = genBlock(key)
+	return cipherBlock
+
+"""
+	This function, genBlock(), generates & returns
+	a cipher block in ECB mode under AES.
+	Parameters: key - bytes
+	Returns: block - AES cipher object
+"""
+def genBlock(key):
+	return AES.new(key, AES.MODE_ECB)
+
+
+
 def verifyClient(loginInfo):
 	username = loginInfo.split('\n')[0]
 	password = loginInfo.split('\n')[1]
