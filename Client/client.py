@@ -61,41 +61,45 @@ def client():
 		verificationMessage = ""
 		try:
 			verificationMessage = verificationMsg.decode('ascii')
-			print(verificationMessage)
 		except:
 			pass
 		
 		if (verificationMessage == "\nLogin failed.\nPlease try again later."):
+			print(verificationMessage)
 			clientSocket.close() 
 			return
-		else:
-			key = decryptSymKey(username, verificationMsg)
-			symKeyToFile(key)
-			
-			#Set up encryption environment
-			cipherBlock = setUpAES(key)
-			confirm = "OK"
-			confirmEnc = encryptMsg(cipherBlock, confirm)
-			clientSocket.send(confirmEnc)
-		
-		
-		menu = clientSocket.recv(2048).decode('ascii')
-		choice = input(menu)
 
-		clientSocket.send(choice.encode('ascii'))
+		key = decryptSymKey(username, verificationMsg)
+		symKeyToFile(key)
 		
-		while (choice != "3"):
+		#Set up encryption environment
+		cipherBlock = setUpAES(key)
+		confirm = "OK"
+		confirmEnc = encryptMsg(cipherBlock, confirm)
+		clientSocket.send(confirmEnc)
+		
+		menu = clientSocket.recv(2048)
+		menuDec = decryption(cipherBlock, menu)
+		
+		choice = input(menuDec)
+		choiceEnc = encryptMsg(cipherBlock, choice)
+		clientSocket.send(choiceEnc)
+		
+		while (choice != "2"):
 		
 			if (choice == "1"):
-				uploadMenu = clientSocket.recv(2048).decode('ascii')
-				uploadChoice = input(uploadMenu)
-				clientSocket.send(uploadChoice.encode('ascii'))
+				uploadMenu = clientSocket.recv(2048)
+				uploadMenuDec = decryption(cipherBlock, uploadMenu)
+				
+				uploadChoice = input(uploadMenuDec)
+				uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
+				clientSocket.send(uploadChoiceEnc)
 					
 				while (uploadChoice != "3"):
 					if (uploadChoice == "1"):
 						
 						#Obtain file info
-						fileInfo = sendFileInfo(clientSocket)
+						fileInfo = sendFileInfo(clientSocket, cipherBlock)
 						
 						#Extract file info
 						div = fileInfo.find('\n')
@@ -103,7 +107,7 @@ def client():
 						
 						if fname.endswith('png') == True:
 							#Use extracted file info to send file contents
-							sendFileContents(clientSocket,fname, size)
+							sendFileContents(cipherBlock, clientSocket, fname, size)
 							print('Upload process completed')
 						else:
 							print('Not an image file.')
@@ -113,52 +117,25 @@ def client():
 						return 
 						
 					else:
-						uploadChoice = input(uploadMenu)
-						clientSocket.send(uploadChoice.encode('ascii'))
+						uploadChoice = input(uploadMenuDec)
+						uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
+						clientSocket.send(uploadChoiceEnc)
 						
-					uploadChoice = input(uploadMenu)
-					clientSocket.send(uploadChoice.encode('ascii'))
-			
-			''' not sure if i want to do delete
-			elif (choice == "2"):
-				deleteMenu = clientSocket.recv(2048).decode('ascii')
-				deleteChoice = input(deleteMenu)
-					
-				while (deleteChoice != "3"):
-					if (deleteChoice == "1"):
-						print("deleting one image")
-					elif (deleteChoice == "2"):
-						print("deleting many images")
-					elif (deleteChoice == "4"):
-						clientSocket.close() #should close mutually
-						return 
-						
-					else:
-						deleteChoice = input(deleteMenu)
-					deleteChoice = input(deleteMenu)
-				
+					uploadChoice = input(uploadMenuDec)
+					uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
+					clientSocket.send(uploadChoiceEnc)
 			else:
-				choice = input(menu)
-				clientSocket.send(choice.encode('ascii'))
-				'''
+				choice = input(menuDec)
+				choiceEnc = encryptMsg(cipherBlock, choice)
+				clientSocket.send(choiceEnc)
 			
-			choice = input(menu)
-			clientSocket.send(choice.encode('ascii'))
+			choice = input(menuDec)
+			choiceEnc = encryptMsg(cipherBlock, choice)
+			clientSocket.send(choiceEnc)
 			
 		clientSocket.close() 
 		return
-		
-		"""
-		#Receive welcome message from server & send name
-		msgExhanger(cipherBlock, clientSocket, '')		
-		
-		#Attempt math questions from server
-		attempt = mathSession(cipherBlock, clientSocket)
-		
-		#Choose to continue (Y) to attempt questions or not
-		while attempt == 'y' or attempt == 'Y':
-			attempt = mathSession(cipherBlock, clientSocket)
-		"""
+
 
 		
 	except socket.error as e:
@@ -228,19 +205,21 @@ def checkDir(fname):
 	Returns: reply - str
 	
 """
-def sendFileInfo(clientSocket):
+def sendFileInfo(clientSocket, cipherBlock):
 	reply = ''
 
 	#Receive item from server that prompts user input
-	prompt = clientSocket.recv(2048).decode('ascii')
-	fname = input(prompt)
+	prompt = clientSocket.recv(2048)
+	promptDec = decryption(cipherBlock, prompt)
+	fname = input(promptDec)
 	
 	#Obtain file size & format response
 	size = checkDir(fname)
 	reply += fname + '\n' + str(size)
+	replyEnc = encryptMsg(cipherBlock, reply)
 	
 	#Sends user input to server
-	clientSocket.send(reply.encode('ascii'))
+	clientSocket.send(replyEnc)
 
 	return reply
 
@@ -251,15 +230,18 @@ def sendFileInfo(clientSocket):
 	Returns: None
 	
 """
-def sendFileContents(clientSocket, fname, fileSize):
+def sendFileContents(cipherBlock, clientSocket, fname, fileSize):
 	
 	#Assign buffer size for transferring
 	bufferSize = 2048
 
 	#When OK is received, initiate transfer
-	ok = clientSocket.recv(2048).decode('ascii')
-	print(ok)
-	if 'OK' in ok:
+	ok = clientSocket.recv(2048)
+	okDec = decryption(cipherBlock, ok)
+	
+	print(okDec)
+	
+	if 'OK' in okDec:
 	
 		with open(fname, "rb") as f:
 			
@@ -270,7 +252,8 @@ def sendFileContents(clientSocket, fname, fileSize):
 				if not fileContents:
 					break
 				else:
-					clientSocket.send(fileContents)
+					fileContentsEnc = encryptData(cipherBlock, fileContents)
+					clientSocket.send(fileContentsEnc)
 		f.close()
 	
 	return None
@@ -329,6 +312,19 @@ def encryptMsg(cipherBlock, msg):
 	cipherText = cipherBlock.encrypt(pad(msg.encode('ascii'),32)) #Note 32: key len/divisible by is 256
 	#print('Cipher text/encrypted message: ', cipherText)
 	return cipherText
+
+"""
+	This function, encryptMsg(), encodes,
+	pads (up to 256 bits), encrypts and
+	returns a message.
+	Parameters: cipherBlock - AES cipher object, msg - str
+	Returns: cipherText - 
+"""
+def encryptData(cipherBlock, data):
+	cipherText = cipherBlock.encrypt(pad(data, 32)) #Note 32: key len/divisible by is 256
+	#print('Cipher text/encrypted message: ', cipherText)
+	return cipherText
+
 
 
 """

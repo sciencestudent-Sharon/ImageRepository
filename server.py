@@ -78,77 +78,70 @@ def server():
 				loginInfoEnc = connectionSocket.recv(2048)
 				loginInfoDec = decryptionPubic(loginInfoEnc)
 
-				(sessionKey, encSymmKey) = verifyClient(loginInfoDec)
+				try:
+					clientKeysInfo = verifyClient(loginInfoDec)
+					[sessionKey, encSymmKey, clientName] = clientKeysInfo
+				except:
+					sessionKey = False
+				
 				
 				if (sessionKey == False):
 					verificationMessage = "\nLogin failed.\nPlease try again later."
 					connectionSocket.send(verificationMessage.encode('ascii'))
 					connectionSocket.close() 
 					return
-				else:
-					connectionSocket.send(encSymmKey)
-					clientConfirmation = connectionSocket.recv(2048)
-					ciphBlock = setUpAES(sessionKey)
-					clientConfirmedDec = decryptionInit(ciphBlock, clientConfirmation)
+
+				connectionSocket.send(encSymmKey)
+				clientConfirmation = connectionSocket.recv(2048)
+				cipherBlock = setUpAES(sessionKey)
+				clientConfirmedDec = decryptionInit(cipherBlock, clientConfirmation)
 				
 				
-				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image(s)\n2) Delete Image(s)\n3) Exit Repository\n"
+				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image(s)\n2) Exit Repository\n"
+				mainMenuEnc = encryption(cipherBlock, mainMenu)
+				
 				uploadMenu = "\nUPLOAD MENU\n1) Upload an image\n2) Upload many images\n3) Main Menu\n4) Exit Repository\n"
-				deleteMenu = "\nDELETE MENU\n1) Delete an image\n2) Delete many images\n3) Main Menu\n4) Exit Repository\n"
+				uploadMenuEnc = encryption(cipherBlock, uploadMenu)
 				
-				connectionSocket.send(mainMenu.encode('ascii'))
+				connectionSocket.send(mainMenuEnc)
 				
-				clientChoice = connectionSocket.recv(2048).decode('ascii')
+				clientChoice = connectionSocket.recv(2048)
+				clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice) 
 				
-				while (clientChoice != "3"):
+				while (clientChoiceDec != "2"):
 		
-					if (clientChoice == "1"):
-						connectionSocket.send(uploadMenu.encode('ascii'))
-						clientUploadChoice = connectionSocket.recv(2048).decode('ascii')	
+					if (clientChoiceDec == "1"):
+						connectionSocket.send(uploadMenuEnc)
+						clientUploadChoice = connectionSocket.recv(2048)
+						clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
 						
-						while (clientUploadChoice != "3"):
-							if (clientUploadChoice == "1"):
+						while (clientUploadChoiceDec != "3"):
+							if (clientUploadChoiceDec == "1"):
 								
-								msg = "Enter filename: "
-								fileInfo = fileInfoReceiver(connectionSocket, msg)
-							elif (clientUploadChoice == "4"):
+								fnRequest = "Enter filename: "
+								fileInfo = fileInfoReceiver(cipherBlock, connectionSocket, fnRequest)
+							elif (clientUploadChoiceDec == "4"):
 								connectionSocket.close() 
 								return 
 								
 							else:
-								clientUploadChoice = connectionSocket.recv(2048).decode('ascii')
-							clientUploadChoice = connectionSocket.recv(2048).decode('ascii')
-						
-						
-					elif (clientChoice == "2"):
-						connectionSocket.send(deleteMenu.encode('ascii'))
-						
+								clientUploadChoice = connectionSocket.recv(2048)
+								clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
+								
+							clientUploadChoice = connectionSocket.recv(2048)
+							clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
+							
 					else:
-						clientChoice = connectionSocket.recv(2048).decode('ascii')
+						clientChoice = connectionSocket.recv(2048)
+						clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice)
 					
-					clientChoice = connectionSocket.recv(2048).decode('ascii')
-				
+					clientChoice = connectionSocket.recv(2048)
+					clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice)
+					
 				connectionSocket.close() 
 				return
 				
-				
-				"""
-				userName = msgExchanger(welcome, cipherBlock, connectionSocket)	
-				
-				#Server sends questions to client & receives response for another attempt 
-				attempt  = mathSession(userName, connectionSocket, cipherBlock)
-				
-				#If client chose 'y', server sends client more math questions
-				while attempt == 'y' or attempt == 'Y':
-					
-					attempt = mathSession(userName, connectionSocket, cipherBlock)
 
-				connectionSocket.close()
-
-				##############################################################
-				return
-				"""
-				
 			#Else, server/parent closes duplicate reference to connection socket
 			connectionSocket.close() #ie. client-child process still has ref to conn socket
 		
@@ -196,7 +189,8 @@ def verifyClient(loginInfo):
 		data = json.load(file)
 	if username in data and data[username] == password:
 		sessionKey, encSymmKey = encryptSymKey(username)
-		return (sessionKey, encSymmKey)
+		clientKeysInfo = [sessionKey, encSymmKey, username]
+		return clientKeysInfo
 	else:
 		return False
 
@@ -211,9 +205,9 @@ def verifyClient(loginInfo):
 	Returns: fileInfo - list
 	
 """
-def fileInfoReceiver(connSocket, msg):
-	#Ask client for a filename
-	data = promptSender(connSocket, msg)
+def fileInfoReceiver(cipherBlock, connSocket, msg):
+	#Ask client for file name, get file info
+	data = msgExchanger(msg, cipherBlock, connSocket)
 	
 	#Extract filename & size
 	div = data.find('\n'); fname = data[:div]; fsize = data[div+1:]
@@ -222,7 +216,7 @@ def fileInfoReceiver(connSocket, msg):
 	ok = 'OK ' + fsize
 	
 	#Receive & upload receiving file, obtain time of upload
-	uploadTime = fileContentsReceiver(connSocket, fname, fsize, ok)
+	uploadTime = fileContentsReceiver(cipherBlock, connSocket, fname, fsize, ok)
 	
 	#Collect file info to update metadata file
 	fileInfo = [fname, fsize, uploadTime]
@@ -237,9 +231,10 @@ def fileInfoReceiver(connSocket, msg):
 	Returns: dateTime - datetime
 	
 """
-def fileContentsReceiver(connSocket, fname, fsize, request):
-	#Send OK+size confirmation to client, initiate file exchange	
-	connSocket.send(request.encode('ascii'))
+def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
+	#Send OK+size confirmation to client, initiate file exchange
+	requestEnc = encryption(cipherBlock, request)
+	connSocket.send(requestEnc)
 
 	#Size for receiving file portions
 	bufferSize = 2048
@@ -250,22 +245,25 @@ def fileContentsReceiver(connSocket, fname, fsize, request):
 	
 	#Receive first file BATCH as response to OK message
 	fileContents = connSocket.recv(bufferSize)
-	fileWrite(newFname, fileContents)
+	fileContentsDec = decryptData(cipherBlock, fileContents)
+	fileWrite(newFname, fileContentsDec)
 	
 	#Continue to receive remaining file contents
 	while True:
 		
 		fileContents = connSocket.recv(bufferSize)
+		#decrypt fileContents
+		fileContentsDec = decryptData(cipherBlock, fileContents)
 		
 		#Track size of received batch for handling
-		contentSize = len(fileContents)
+		contentSize = len(fileContentsDec)
 
 		if contentSize == bufferSize:
-			fileAppend(newFname, fileContents)
+			fileAppend(newFname, fileContentsDec)
 				
 		#Handle the last batch of the file  
 		if contentSize < bufferSize:
-			fileAppend(newFname, fileContents)
+			fileAppend(newFname, fileContentsDec)
 			break
 			
 	#Get date/time when entire file received/written in server	
@@ -437,6 +435,18 @@ def removePadding(paddedMsg):
 	return message
 
 
+
+def decryptData(cipherBlock, encryptedData):
+	data = unpad(cipherBlock.decrypt(encryptedData), 32)
+	return data
+'''
+	paddedData = cipherBlock.decrypt(encryptedData)
+	print(paddedData, '\n\n')
+	data = unpad(paddedData, 32) #Note 32: key len/divisible by is 256
+	print(data)
+	return data
+	'''
+	
 ###################################################################################################
 #Message Exchange Functions
 ###################################################################################################
