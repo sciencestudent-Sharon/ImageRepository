@@ -44,20 +44,13 @@ def client():
 	try:
 		#Client connect with server
 		clientSocket.connect((serverName, serverPort))
-		
 		welcome = clientSocket.recv(2048).decode('ascii')
-		username = input(welcome + "\nUsername: ")
-		password = input("Password: ")
-		loginInfo = "" + username + "\n" + password
+		username = sendUserInfo(welcome, clientSocket) 
 		
-		#encryption with server public key (AES)
-		loginInfoEnc = encryptWithPublic(loginInfo)
-		
-		clientSocket.send(loginInfoEnc)
-		
-		#verification 
+		#Handle verification from server
 		verificationMsg = clientSocket.recv(2048)
 		
+		#Determine if the verification from the server is key or login-failed str
 		verificationMessage = ""
 		try:
 			verificationMessage = verificationMsg.decode('ascii')
@@ -69,75 +62,36 @@ def client():
 			clientSocket.close() 
 			return
 
+		#Get symmkey & save it to file
 		key = decryptSymKey(username, verificationMsg)
 		symKeyToFile(key)
 		
 		#Set up encryption environment
-		cipherBlock = setUpAES(key)
-		confirm = "OK"
-		confirmEnc = encryptMsg(cipherBlock, confirm)
-		clientSocket.send(confirmEnc)
+		cipherBlock = createEncEnviro(clientSocket, key)
 		
-		menu = clientSocket.recv(2048)
-		menuDec = decryption(cipherBlock, menu)
-		
-		choice = input(menuDec)
-		choiceEnc = encryptMsg(cipherBlock, choice)
-		clientSocket.send(choiceEnc)
+		#Handle menu reception & user choice
+		menu, choice = getMenuChoice(clientSocket, cipherBlock)
 		
 		while (choice != "2"):
 		
 			if (choice == "1"):
-				uploadMenu = clientSocket.recv(2048)
-				uploadMenuDec = decryption(cipherBlock, uploadMenu)
 				
-				uploadChoice = input(uploadMenuDec)
-				uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
-				clientSocket.send(uploadChoiceEnc)
-					
-				while (uploadChoice != "3"):
-					if (uploadChoice == "1"):
-						
-						#Obtain file info
-						fileInfo = sendFileInfo(clientSocket, cipherBlock)
-						
-						#Extract file info
-						div = fileInfo.find('\n')
-						fname = fileInfo[:div]; size = fileInfo[div+1:]
-						
-						if fname.endswith('png') == True:
-							#Use extracted file info to send file contents
-							sendFileContents(cipherBlock, clientSocket, fname, size)
-							print('Upload process completed')
-						else:
-							print('Not an image file.')
-						
-					elif (uploadChoice == "4"):
-						clientSocket.close()
-						return 
-						
-					else:
-						uploadChoice = input(uploadMenuDec)
-						uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
-						clientSocket.send(uploadChoiceEnc)
-						
-					uploadChoice = input(uploadMenuDec)
-					uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
-					clientSocket.send(uploadChoiceEnc)
+				#Get upload menu, handle user upload choices & file upload
+				uploadMenu, uploadChoice = getUploadMenuChoice(clientSocket, cipherBlock)
+				uploadChoice = handleUploadMenu(clientSocket, cipherBlock, uploadMenu, uploadChoice)
+				
+				#In uploadmenu: Handle user choice to terminate connection
+				if uploadChoice == "3":
+					choice = getMenuChoiceShort(clientSocket, cipherBlock, menu)
+				else: #uploadChoice == "4"
+					clientSocket.close()
+					return
 			else:
-				choice = input(menuDec)
-				choiceEnc = encryptMsg(cipherBlock, choice)
-				clientSocket.send(choiceEnc)
-			
-			choice = input(menuDec)
-			choiceEnc = encryptMsg(cipherBlock, choice)
-			clientSocket.send(choiceEnc)
+				choice = getMenuChoiceShort(clientSocket, cipherBlock, menu)
 			
 		clientSocket.close() 
 		return
 
-
-		
 	except socket.error as e:
 		print('Error occurred: ', e)
 		clientSocket.close()
@@ -145,13 +99,79 @@ def client():
 	
 	except Exception as inst:
 		print('Error with', inst)
-	
+
+#=========================================================================================================#
+# MENU - FUNCTIONS
+#=========================================================================================================#
 		
+def getMenuChoice(clientSocket, cipherBlock):
+	menu = clientSocket.recv(2048)
+	menuDec = decryption(cipherBlock, menu)
+	
+	choice = input(menuDec)
+	choiceEnc = encryptMsg(cipherBlock, choice)
+	clientSocket.send(choiceEnc)
+	
+	return (menuDec, choice)
+
+def getMenuChoiceShort(clientSocket, cipherBlock, menu):
+	choice = input(menu)
+	choiceEnc = encryptMsg(cipherBlock, choice)
+	clientSocket.send(choiceEnc)
+	return choice
+
+def getUploadMenuChoice(clientSocket, cipherBlock):		
+	uploadMenu = clientSocket.recv(2048)
+	uploadMenuDec = decryption(cipherBlock, uploadMenu)
+	
+	uploadChoice = input(uploadMenuDec)
+	uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
+	clientSocket.send(uploadChoiceEnc)
+	return (uploadMenuDec, uploadChoice)
+
+
+def getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu):
+	uploadChoice = input(uploadMenu)
+	uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
+	clientSocket.send(uploadChoiceEnc)
+	return uploadChoice
+
+
+def handleUploadMenu(clientSocket, cipherBlock, uploadMenu, uploadChoice):	
+	
+	while (uploadChoice != "3"):
+	
+		if (uploadChoice == "1"):
+			
+			#Obtain file info
+			fileInfo = sendFileInfo(clientSocket, cipherBlock)
+			
+			#Extract file info
+			div = fileInfo.find('\n')
+			fname = fileInfo[:div]; size = fileInfo[div+1:]
+			
+			if fname.endswith('.png') == True or fname.endswith('.jpeg') or fname.endswith('.jpg') or fname.endswith('.gif'):
+				#Use extracted file info to send file contents
+				sendFileContents(cipherBlock, clientSocket, fname, size)
+				print('Upload process completed.')
+			else:
+				print('Upload process could not be completed.')
+			
+			uploadChoice = getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)	
+			
+		elif (uploadChoice == "4"):
+			#clientSocket.close()
+			return uploadChoice
+			
+		else:
+			uploadChoice = getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)
+	
+	return uploadChoice
+
 #####################################################################################################
-#Functions
+#Prep Functions - prep for encryption, obtain user info
 #####################################################################################################
 
-#prep for AES encryption
 """
 	This function, setUpCrypto(), generates an
 	encryption key and cipher block.
@@ -173,7 +193,22 @@ def genBlock(key):
 	return AES.new(key, AES.MODE_ECB)
 
 
+def sendUserInfo(welcomeMsg, clientSocket):
+	username = input(welcomeMsg + "\nUsername: ")
+	password = input("Password: ")
+	loginInfo = "" + username + "\n" + password
+	
+	#encryption with server public key (AES)
+	loginInfoEnc = encryptWithPublic(loginInfo)
+	clientSocket.send(loginInfoEnc)
+	return username
 
+def createEncEnviro(clientSocket, key):
+	cipherBlock = setUpAES(key)
+	confirm = "OK"
+	confirmEnc = encryptMsg(cipherBlock, confirm)
+	clientSocket.send(confirmEnc)
+	return cipherBlock
 
 #=========================================================================================================#
 # FILE - FUNCTIONS
@@ -252,10 +287,15 @@ def sendFileContents(cipherBlock, clientSocket, fname, fileSize):
 				if not fileContents:
 					break
 				else:
-					fileContentsEnc = encryptData(cipherBlock, fileContents)
-					clientSocket.send(fileContentsEnc)
+					#fileContentsEnc = encryptData(cipherBlock, b64Str)
+					clientSocket.send(fileContents)
 		f.close()
 	
+	return None
+
+
+
+def fileUpload():
 	return None
 
 
@@ -321,7 +361,7 @@ def encryptMsg(cipherBlock, msg):
 	Returns: cipherText - 
 """
 def encryptData(cipherBlock, data):
-	cipherText = cipherBlock.encrypt(pad(data, 32)) #Note 32: key len/divisible by is 256
+	cipherText = cipherBlock.encrypt(pad(data, 32)) #Note 32: key len/divisible by 256
 	#print('Cipher text/encrypted message: ', cipherText)
 	return cipherText
 

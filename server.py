@@ -7,7 +7,9 @@ Pycryptodome docs: https://pycryptodome.readthedocs.io/en/latest/
 
 Author: Sharon Lee
 """
-
+from PIL import Image
+import io
+import key_generator
 import socket
 import sys
 import os
@@ -119,7 +121,7 @@ def server():
 							if (clientUploadChoiceDec == "1"):
 								
 								fnRequest = "Enter filename: "
-								fileInfo = fileInfoReceiver(cipherBlock, connectionSocket, fnRequest)
+								fileInfo = fileInfoReceiver(clientName, cipherBlock, connectionSocket, fnRequest)
 							elif (clientUploadChoiceDec == "4"):
 								connectionSocket.close() 
 								return 
@@ -205,7 +207,7 @@ def verifyClient(loginInfo):
 	Returns: fileInfo - list
 	
 """
-def fileInfoReceiver(cipherBlock, connSocket, msg):
+def fileInfoReceiver(user, cipherBlock, connSocket, msg):
 	#Ask client for file name, get file info
 	data = msgExchanger(msg, cipherBlock, connSocket)
 	
@@ -215,11 +217,22 @@ def fileInfoReceiver(cipherBlock, connSocket, msg):
 	#Create confirmation of request
 	ok = 'OK ' + fsize
 	
-	#Receive & upload receiving file, obtain time of upload
-	uploadTime = fileContentsReceiver(cipherBlock, connSocket, fname, fsize, ok)
+	if fname.endswith('.png') == True or fname.endswith('.jpeg') or fname.endswith('.jpg') or fname.endswith('.gif'):
 	
-	#Collect file info to update metadata file
-	fileInfo = [fname, fsize, uploadTime]
+		#Receive & upload receiving file, obtain time of upload
+		uploadTime = fileContentsReceiver(cipherBlock, connSocket, fname, fsize, ok)
+	
+		#Insert file into associated client folder
+		path = os.getcwd() 
+		filePath = path + "/" + fname
+		newFilePath = path + "/" + user + "/" + fname
+		os.rename(filePath, newFilePath)
+	
+		#Collect file info to update metadata file
+		fileInfo = [fname, fsize, uploadTime]
+		return fileInfo
+	
+	fileInfo = [fname, fsize, "Not Uploaded."]
 	return fileInfo
 
 
@@ -245,25 +258,25 @@ def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 	
 	#Receive first file BATCH as response to OK message
 	fileContents = connSocket.recv(bufferSize)
-	fileContentsDec = decryptData(cipherBlock, fileContents)
-	fileWrite(newFname, fileContentsDec)
+	#fileContentsDec = decryptData(cipherBlock, fileContents)
+	fileWrite(newFname, fileContents)
 	
 	#Continue to receive remaining file contents
 	while True:
 		
 		fileContents = connSocket.recv(bufferSize)
 		#decrypt fileContents
-		fileContentsDec = decryptData(cipherBlock, fileContents)
+		#fileContentsDec = decryptData(cipherBlock, fileContents)
 		
 		#Track size of received batch for handling
-		contentSize = len(fileContentsDec)
+		contentSize = len(fileContents)
 
 		if contentSize == bufferSize:
-			fileAppend(newFname, fileContentsDec)
+			fileAppend(newFname, fileContents)
 				
 		#Handle the last batch of the file  
 		if contentSize < bufferSize:
-			fileAppend(newFname, fileContentsDec)
+			fileAppend(newFname, fileContents)
 			break
 			
 	#Get date/time when entire file received/written in server	
@@ -369,12 +382,6 @@ def encryptSymKey(clientName):
 
 
 
-
-
-
-
-
-
 """
 	This function, encryption(), encodes,
 	pads (up to 256 bits), encrypts and
@@ -438,6 +445,7 @@ def removePadding(paddedMsg):
 
 def decryptData(cipherBlock, encryptedData):
 	data = unpad(cipherBlock.decrypt(encryptedData), 32)
+	data = io.BytesIO(base64.b64decode(data))
 	return data
 '''
 	paddedData = cipherBlock.decrypt(encryptedData)

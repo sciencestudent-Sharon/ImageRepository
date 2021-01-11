@@ -1,11 +1,10 @@
 
+import json
 import os
 import shutil
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 from Crypto.Cipher import PKCS1_OAEP
-
-#from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
 def pubKeyGenerator(key):
@@ -15,7 +14,6 @@ def pubKeyGenerator(key):
 def privKeyGenerator(key):
 	private_key = key.export_key()
 	return private_key
-	
 	
 def pubkeyToFile(key, fname):
 	newFile = open(fname, "wb")
@@ -31,28 +29,35 @@ def privkeyToFile(key, fname):
 	newFile.write(privKey)
 	newFile.close()
 	return privKey
-	
 
 def checkKeyFile(fname):
 	f = open(fname, "rb")
 	content = f.read()
 	return content
 
-def showKeys():
+def collectClients():
+	#Collect existing users from stored user_pass.json file
+	clientList = []
+	with open('user_pass.json') as file:
+		data = json.load(file)
+	for username in data:
+		clientList.append(username)
+	
+	return clientList
 
+def showKeys():
 	
-	clientList = ["client1", "client2", "client3", "client4", "client5"]
-	#should pull above from the json file	
-		
+	clientList = collectClients()
+	
+	#Generate public & private keys, place them into files for future use	
 	key = RSA.generate(2048)
-	
 	pubkeyToFile(key, "server_public.pem")
 	privkeyToFile(key, "server_private.pem")
 	
+	#Get current working directory path
 	path = os.getcwd()
-	#print("Current working directory is %s" % path)
 	
-	#reference: 
+	#For each user in client list, create folder
 	for client in clientList:
 		newPath = path + "/" + client + "/"
 		fnPubKey = "" + client + "_public.pem"
@@ -63,7 +68,8 @@ def showKeys():
 		try:
 			os.mkdir(newPath)
 		except OSError:
-			print("Creating directory failed.")
+			#print("Creating directory failed: ", OSError)
+			pass
 		else:
 			pass
 		
@@ -72,12 +78,15 @@ def showKeys():
 		
 		#shutil.copyfile(path + "/server_public.pem", newPath + "/server_public.pem")
 		
-		
-		#for testing with client1 and client2
+		#for testing: copy client1 & client2 keys to Client folder
 		if client == "client1" or client == "client2":
 			shutil.copyfile(path + "/server_public.pem", path + "/Client" + "/server_public.pem")
 			shutil.copyfile(newPath + "/" + fnPrivKey, path + "/Client/" + fnPrivKey)	
-			
+
+
+
+
+		
 #------
 showKeys()
 
