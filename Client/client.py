@@ -78,12 +78,12 @@ def client():
 				
 				#Get upload menu, handle user upload choices & file upload
 				uploadMenu, uploadChoice = getUploadMenuChoice(clientSocket, cipherBlock)
-				uploadChoice = handleUploadMenu(clientSocket, cipherBlock, uploadMenu, uploadChoice)
+				uploadChoice = handleUploadMenu(key, clientSocket, cipherBlock, uploadMenu, uploadChoice)
 				
 				#In uploadmenu: Handle user choice to terminate connection
-				if uploadChoice == "3":
+				if uploadChoice == "2":
 					choice = getMenuChoiceShort(clientSocket, cipherBlock, menu)
-				else: #uploadChoice == "4"
+				else: #uploadChoice == "3"
 					clientSocket.close()
 					return
 			else:
@@ -137,7 +137,7 @@ def getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu):
 	return uploadChoice
 
 
-def handleUploadMenu(clientSocket, cipherBlock, uploadMenu, uploadChoice):	
+def handleUploadMenu(key, clientSocket, cipherBlock, uploadMenu, uploadChoice):	
 	
 	while (uploadChoice != "3"):
 	
@@ -152,7 +152,8 @@ def handleUploadMenu(clientSocket, cipherBlock, uploadMenu, uploadChoice):
 			
 			if fname.endswith('.png') == True or fname.endswith('.jpeg') or fname.endswith('.jpg') or fname.endswith('.gif'):
 				#Use extracted file info to send file contents
-				sendFileContents(cipherBlock, clientSocket, fname, size)
+				sendFileContents(key, cipherBlock, clientSocket, fname, size)
+				#sendEncFileContents(cipherBlock, clientSocket, fname, fileSize)
 				print('Upload process completed.')
 			else:
 				print('Upload process could not be completed.')
@@ -265,8 +266,7 @@ def sendFileInfo(clientSocket, cipherBlock):
 	Returns: None
 	
 """
-def sendFileContents(cipherBlock, clientSocket, fname, fileSize):
-	
+def sendFileContents(key, cipherBlock, clientSocket, fname, fileSize):
 	#Assign buffer size for transferring
 	bufferSize = 2048
 
@@ -294,8 +294,46 @@ def sendFileContents(cipherBlock, clientSocket, fname, fileSize):
 	return None
 
 
+"""
+	This function, sendFileContents(), sends
+	file contents while it's not entirely sent.
+	Parameters: 
+	Returns: None
+	
+"""
+def sendEncFileContents(cipherBlock, clientSocket, fname, fileSize):
+	#ciipher object & enc data
+	cipher_enc = AES.new(key, AES.MODE_CFB)
+	#send the iv
+	enc_iv = encryptMsg(cipherBlock, cipher_enc.iv)
+	clientSocket.send(enc_iv)
+	print(cipher_enc.iv)
+	
+	
+	#Assign buffer size for transferring
+	bufferSize = 2048
 
-def fileUpload():
+	#When OK is received, initiate transfer
+	ok = clientSocket.recv(2048)
+	okDec = decryption(cipherBlock, ok)
+	
+	print(okDec)
+	
+	if 'OK' in okDec:
+	
+		with open(fname, "rb") as f:
+			
+			#Continue to read file in binary, send to server
+			while True:
+				
+				fileContents = f.read(bufferSize)
+				if not fileContents:
+					break
+				else:
+					#fileContentsEnc = encryptData(cipherBlock, b64Str)
+					clientSocket.send(fileContents)
+		f.close()
+	
 	return None
 
 

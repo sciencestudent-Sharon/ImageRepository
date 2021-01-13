@@ -7,9 +7,9 @@ Pycryptodome docs: https://pycryptodome.readthedocs.io/en/latest/
 
 Author: Sharon Lee
 """
+import key_generator
 from PIL import Image
 import io
-import key_generator
 import socket
 import sys
 import os
@@ -76,6 +76,9 @@ def server():
 				
 				#Server sends welcome to client & receives their name
 				welcome  = 'Welcome to the Image Repository\n\nPlease enter your login. '
+				#Run the key generator with every login session
+				os.system('python3 key_generator.py')
+				
 				connectionSocket.send(welcome.encode('ascii'))
 				loginInfoEnc = connectionSocket.recv(2048)
 				loginInfoDec = decryptionPubic(loginInfoEnc)
@@ -99,10 +102,10 @@ def server():
 				clientConfirmedDec = decryptionInit(cipherBlock, clientConfirmation)
 				
 				
-				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image(s)\n2) Exit Repository\n"
+				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image\n2) Exit Repository\n"
 				mainMenuEnc = encryption(cipherBlock, mainMenu)
 				
-				uploadMenu = "\nUPLOAD MENU\n1) Upload an image\n2) Upload many images\n3) Main Menu\n4) Exit Repository\n"
+				uploadMenu = "\nUPLOAD MENU\n1) Upload an image\n2) Main Menu\n3) Exit Repository\n"
 				uploadMenuEnc = encryption(cipherBlock, uploadMenu)
 				
 				connectionSocket.send(mainMenuEnc)
@@ -117,12 +120,12 @@ def server():
 						clientUploadChoice = connectionSocket.recv(2048)
 						clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
 						
-						while (clientUploadChoiceDec != "3"):
+						while (clientUploadChoiceDec != "2"):
 							if (clientUploadChoiceDec == "1"):
 								
 								fnRequest = "Enter filename: "
 								fileInfo = fileInfoReceiver(clientName, cipherBlock, connectionSocket, fnRequest)
-							elif (clientUploadChoiceDec == "4"):
+							elif (clientUploadChoiceDec == "3"):
 								connectionSocket.close() 
 								return 
 								
@@ -189,6 +192,7 @@ def verifyClient(loginInfo):
 
 	with open('user_pass.json') as file:
 		data = json.load(file)
+	file.close()
 	if username in data and data[username] == password:
 		sessionKey, encSymmKey = encryptSymKey(username)
 		clientKeysInfo = [sessionKey, encSymmKey, username]
@@ -221,7 +225,7 @@ def fileInfoReceiver(user, cipherBlock, connSocket, msg):
 	
 		#Receive & upload receiving file, obtain time of upload
 		uploadTime = fileContentsReceiver(cipherBlock, connSocket, fname, fsize, ok)
-	
+		#uploadTime = fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request)
 		#Insert file into associated client folder
 		path = os.getcwd() 
 		filePath = path + "/" + fname
@@ -282,6 +286,59 @@ def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 	#Get date/time when entire file received/written in server	
 	dateTime = datetime.now()
 	return dateTime
+	
+"""
+	This function, fileContentsReceiver() handles
+	file content transfer between server and
+	client programs.
+	Parameters: connSocket - socket, fname - str, fsize - str, request - str
+	Returns: dateTime - datetime
+	
+"""
+def fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
+	enc_iv = connSocket.recv()
+	iv = decryptMsg(cipherBlock, enc_iv)
+	print(iv)
+	
+
+	#Send OK+size confirmation to client, initiate file exchange
+	requestEnc = encryption(cipherBlock, request)
+	connSocket.send(requestEnc)
+
+	#Size for receiving file portions
+	bufferSize = 2048
+	
+	#Create a new file in server directory
+	newFname = fname 
+	newFile = open(newFname, "w"); newFile.close()
+	
+	#Receive first file BATCH as response to OK message
+	fileContents = connSocket.recv(bufferSize)
+	#fileContentsDec = decryptData(cipherBlock, fileContents)
+	fileWrite(newFname, fileContents)
+	
+	#Continue to receive remaining file contents
+	while True:
+		
+		fileContents = connSocket.recv(bufferSize)
+		#decrypt fileContents
+		#fileContentsDec = decryptData(cipherBlock, fileContents)
+		
+		#Track size of received batch for handling
+		contentSize = len(fileContents)
+
+		if contentSize == bufferSize:
+			fileAppend(newFname, fileContents)
+				
+		#Handle the last batch of the file  
+		if contentSize < bufferSize:
+			fileAppend(newFname, fileContents)
+			break
+			
+	#Get date/time when entire file received/written in server	
+	dateTime = datetime.now()
+	return dateTime
+
 
 """
 	This function, fileWrite() writes data
@@ -318,6 +375,7 @@ def fileAppend(newFname, dataReceived):
 def fileHandler(fname):
 	keyFile = open(fname, "rb")
 	content = keyFile.read()
+	keyFile.close()
 	return content
 
 def getPubKey():
@@ -376,11 +434,6 @@ def encryptSymKey(clientName):
 	cipher = generateSessionKey()
 	encSymKey = encryptionPubicClient(cipher, clientName)
 	return (cipher, encSymKey)
-
-
-
-
-
 
 """
 	This function, encryption(), encodes,
@@ -441,11 +494,9 @@ def removePadding(paddedMsg):
 	message    = encodedMsg.decode('ascii')
 	return message
 
-
-
 def decryptData(cipherBlock, encryptedData):
 	data = unpad(cipherBlock.decrypt(encryptedData), 32)
-	data = io.BytesIO(base64.b64decode(data))
+	print(data)
 	return data
 '''
 	paddedData = cipherBlock.decrypt(encryptedData)
