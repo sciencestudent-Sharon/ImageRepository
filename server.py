@@ -1,5 +1,5 @@
 """
-Uses Fork to Connect to Multiple Clients
+Uses Fork to Connect to Multiple Clients (Client.py)
 Uses AES (ECB Mode) for Encryption/Decryption
 
 Reference: Computer Networking: A Top Down Approach Chapter 2
@@ -8,7 +8,6 @@ Pycryptodome docs: https://pycryptodome.readthedocs.io/en/latest/
 Author: Sharon Lee
 """
 import key_generator
-from PIL import Image
 import io
 import socket
 import sys
@@ -61,9 +60,8 @@ def server():
 	while 1:
 
 		try:
-
 			#Server accepts ONE client connection
-			connectionSocket, addr = serverSocket.accept()
+			connSocket, addr = serverSocket.accept()
 			pid = os.fork() #Process ID 
 			
 			#If it's a client-child process
@@ -72,83 +70,59 @@ def server():
 				serverSocket.close() #ie. server still references socket server
 				
 				##############################################################
-				#Communication Exchange
-				
-				#Server sends welcome to client & receives their name
+				#Communication Exchange: Server sends welcome to client & receives their login
 				welcome  = 'Welcome to the Image Repository\n\nPlease enter your login. '
-				#Run the key generator with every login session
-				os.system('python3 key_generator.py')
+				connSocket.send(welcome.encode('ascii'))
 				
-				connectionSocket.send(welcome.encode('ascii'))
-				loginInfoEnc = connectionSocket.recv(2048)
+				#Get client's login info & decrypt it
+				loginInfoEnc = connSocket.recv(2048)
 				loginInfoDec = decryptionPubic(loginInfoEnc)
-
+				
+				#Authenticate login info and send key if verified
 				try:
 					clientKeysInfo = verifyClient(loginInfoDec)
 					[sessionKey, encSymmKey, clientName] = clientKeysInfo
 				except:
 					sessionKey = False
 				
-				
-				if (sessionKey == False):
+				if (sessionKey == False): #Failed authentication, notify client and terminate connection
 					verificationMessage = "\nLogin failed.\nPlease try again later."
-					connectionSocket.send(verificationMessage.encode('ascii'))
-					connectionSocket.close() 
+					connSocket.send(verificationMessage.encode('ascii'))
+					connSocket.close() 
 					return
-
-				connectionSocket.send(encSymmKey)
-				clientConfirmation = connectionSocket.recv(2048)
-				cipherBlock = setUpAES(sessionKey)
-				clientConfirmedDec = decryptionInit(cipherBlock, clientConfirmation)
 				
+				#Set up cipher based on session key for this client
+				ciphBlock = setUpAES(sessionKey)
 				
-				mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image\n2) Exit Repository\n"
-				mainMenuEnc = encryption(cipherBlock, mainMenu)
+				#Symmetric key is encrypted and sent to client
+				connSocket.send(encSymmKey)
+				clientConfirmation = connSocket.recv(2048)
+				clientConfirmedDec = decryptionInit(ciphBlock, clientConfirmation)
 				
-				uploadMenu = "\nUPLOAD MENU\n1) Upload an image\n2) Main Menu\n3) Exit Repository\n"
-				uploadMenuEnc = encryption(cipherBlock, uploadMenu)
-				
-				connectionSocket.send(mainMenuEnc)
-				
-				clientChoice = connectionSocket.recv(2048)
-				clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice) 
-				
-				while (clientChoiceDec != "2"):
+				#Encrypt main and upload menus
+				mainMenuEnc, uploadMenuEnc = encryptMenus(ciphBlock)
+				choice = getMenuChoice(connSocket, ciphBlock, mainMenuEnc, clientName)
+				while (choice != "2"):
 		
-					if (clientChoiceDec == "1"):
-						connectionSocket.send(uploadMenuEnc)
-						clientUploadChoice = connectionSocket.recv(2048)
-						clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
+					if (choice == "1"): #Present upload menu
 						
-						while (clientUploadChoiceDec != "2"):
-							if (clientUploadChoiceDec == "1"):
-								
-								fnRequest = "Enter filename: "
-								fileInfo = fileInfoReceiver(clientName, cipherBlock, connectionSocket, fnRequest)
-							elif (clientUploadChoiceDec == "3"):
-								connectionSocket.close() 
-								return 
-								
-							else:
-								clientUploadChoice = connectionSocket.recv(2048)
-								clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
-								
-							clientUploadChoice = connectionSocket.recv(2048)
-							clientUploadChoiceDec = decryptionUser(clientName, cipherBlock, clientUploadChoice)
-							
+						uploadChoice = getMenuChoice(connSocket, ciphBlock, uploadMenuEnc, clientName)
+						#Input upload choice into upload menu handler 
+						uploadChoice = handleUploadMenu(connSocket, ciphBlock, uploadChoice, clientName)
+						
+						if uploadChoice == "2": #Client wants to view main menu
+							choice = getMenuChoiceShort(connSocket, ciphBlock, clientName)
+						else:
+							connSocket.close()
+							return
 					else:
-						clientChoice = connectionSocket.recv(2048)
-						clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice)
+						choice = getMenuChoiceShort(connSocket, ciphBlock, clientName)
 					
-					clientChoice = connectionSocket.recv(2048)
-					clientChoiceDec = decryptionUser(clientName, cipherBlock, clientChoice)
-					
-				connectionSocket.close() 
+				connSocket.close() 
 				return
-				
-
+			
 			#Else, server/parent closes duplicate reference to connection socket
-			connectionSocket.close() #ie. client-child process still has ref to conn socket
+			connSocket.close() #ie. client-child process still has ref to conn socket
 		
 		except socket.error as e:
 			print('Error occurred: ', e)
@@ -160,6 +134,80 @@ def server():
 
 
 #=========================================================================================================#
+# MENU - FUNCTIONS
+#=========================================================================================================#
+
+"""
+	This function, encryptMenus(), creates and
+	encrypts main and upload menu.
+	Parameters: ciphBlock - cipher
+	Returns: (mainMenuEnc, uploadMenuEnc) - str
+"""
+def encryptMenus(ciphBlock):
+	#Prep, encrypt main and upload menus
+	mainMenu = "\nMAIN MENU\nPlease choose from below options:\n1) Upload Image\n2) Exit Repository\n"
+	mainMenuEnc = encryption(ciphBlock, mainMenu)
+	
+	uploadMenu = "\nUPLOAD MENU\n1) Upload an image\n2) Main Menu\n3) Exit Repository\n"
+	uploadMenuEnc = encryption(ciphBlock, uploadMenu)
+	
+	return (mainMenuEnc, uploadMenuEnc)
+
+"""
+	This function, getMenuChoice(), sends a menu, 
+	gets client choice, decrypts this choice and
+	returns it.
+	Parameters: connSocket - socket, ciphBlock- cipher, 
+	uploadMenuEnc - str, clientName - str
+	Returns: clientUploadChoiceDec - str
+"""
+def getMenuChoice(connSocket, ciphBlock, uploadMenuEnc, clientName):
+	#send pre-encrypted menu to client
+	connSocket.send(uploadMenuEnc)
+	
+	clientUploadChoice = connSocket.recv(2048)
+	clientUploadChoiceDec = decryptionUser(clientName, ciphBlock, clientUploadChoice)
+
+	return clientUploadChoiceDec
+
+"""
+	This function, getMenuChoiceShort(), gets client choice, 
+	decrypts this choice and returns it.
+	Parameters: connSocket - socket, ciphBlock- cipher, clientName - str
+	Returns: uploadChoice - str
+"""
+def getMenuChoiceShort(connSocket, ciphBlock, clientName):
+	clientUploadChoice = connSocket.recv(2048)
+	uploadChoice = decryptionUser(clientName, ciphBlock, clientUploadChoice)
+	return uploadChoice
+
+
+"""
+	This function, handleUploadMenu(), prompts
+	client with file request and proceses upload menu choices.
+	Parameters: connSocket - socket, ciphBlock- cipher, 
+	uploadChoice - str, clientName - str
+	Returns: uploadChoice - str
+"""
+def handleUploadMenu(connSocket, ciphBlock, uploadChoice, clientName):
+
+	while (uploadChoice != "2"):
+		if (uploadChoice == "1"): #enter one file 
+			
+			fnRequest = "Enter filename: "
+			fileInfo = fileInfoReceiver(clientName, ciphBlock, connSocket, fnRequest)
+			uploadChoice = getMenuChoiceShort(connSocket, ciphBlock, clientName)
+			
+		elif (uploadChoice == "3"): #terminate connection
+			return uploadChoice
+			
+		else:
+			uploadChoice = getMenuChoiceShort(connSocket, ciphBlock, clientName)
+	
+	return uploadChoice
+
+
+#=========================================================================================================#
 # LOGIN - FUNCTIONS
 #=========================================================================================================#
 
@@ -168,12 +216,12 @@ def server():
 	This function, setUpCrypto(), generates an
 	encryption key and cipher block.
 	Parameters: fname - string
-	Returns: (Key, cipherBlock) - tuple
+	Returns: (Key, ciphBlock) - tuple
 """
 def setUpAES(key):
 	#Generate cipher block
-	cipherBlock = genBlock(key)
-	return cipherBlock
+	ciphBlock = genBlock(key)
+	return ciphBlock
 
 """
 	This function, genBlock(), generates & returns
@@ -184,8 +232,12 @@ def setUpAES(key):
 def genBlock(key):
 	return AES.new(key, AES.MODE_ECB)
 
-
-
+"""
+	This function, verifyClient(), checks login
+	information in the json file.
+	Parameters: loginInfo - str
+	Returns: clientKeysInfo - str / False - bool 
+"""
 def verifyClient(loginInfo):
 	username = loginInfo.split('\n')[0]
 	password = loginInfo.split('\n')[1]
@@ -193,6 +245,7 @@ def verifyClient(loginInfo):
 	with open('user_pass.json') as file:
 		data = json.load(file)
 	file.close()
+	
 	if username in data and data[username] == password:
 		sessionKey, encSymmKey = encryptSymKey(username)
 		clientKeysInfo = [sessionKey, encSymmKey, username]
@@ -211,9 +264,9 @@ def verifyClient(loginInfo):
 	Returns: fileInfo - list
 	
 """
-def fileInfoReceiver(user, cipherBlock, connSocket, msg):
+def fileInfoReceiver(user, ciphBlock, connSocket, msg):
 	#Ask client for file name, get file info
-	data = msgExchanger(msg, cipherBlock, connSocket)
+	data = msgExchanger(msg, ciphBlock, connSocket)
 	
 	#Extract filename & size
 	div = data.find('\n'); fname = data[:div]; fsize = data[div+1:]
@@ -224,8 +277,8 @@ def fileInfoReceiver(user, cipherBlock, connSocket, msg):
 	if fname.endswith('.png') == True or fname.endswith('.jpeg') or fname.endswith('.jpg') or fname.endswith('.gif'):
 	
 		#Receive & upload receiving file, obtain time of upload
-		uploadTime = fileContentsReceiver(cipherBlock, connSocket, fname, fsize, ok)
-		#uploadTime = fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request)
+		uploadTime = fileContentsReceiver(ciphBlock, connSocket, fname, fsize, ok)
+		#uploadTime = fileDecContentsReceiver(ciphBlock, connSocket, fname, fsize, request)
 		#Insert file into associated client folder
 		path = os.getcwd() 
 		filePath = path + "/" + fname
@@ -248,9 +301,9 @@ def fileInfoReceiver(user, cipherBlock, connSocket, msg):
 	Returns: dateTime - datetime
 	
 """
-def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
+def fileContentsReceiver(ciphBlock, connSocket, fname, fsize, request):
 	#Send OK+size confirmation to client, initiate file exchange
-	requestEnc = encryption(cipherBlock, request)
+	requestEnc = encryption(ciphBlock, request)
 	connSocket.send(requestEnc)
 
 	#Size for receiving file portions
@@ -262,7 +315,7 @@ def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 	
 	#Receive first file BATCH as response to OK message
 	fileContents = connSocket.recv(bufferSize)
-	#fileContentsDec = decryptData(cipherBlock, fileContents)
+	#fileContentsDec = decryptData(ciphBlock, fileContents)
 	fileWrite(newFname, fileContents)
 	
 	#Continue to receive remaining file contents
@@ -270,7 +323,7 @@ def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 		
 		fileContents = connSocket.recv(bufferSize)
 		#decrypt fileContents
-		#fileContentsDec = decryptData(cipherBlock, fileContents)
+		#fileContentsDec = decryptData(ciphBlock, fileContents)
 		
 		#Track size of received batch for handling
 		contentSize = len(fileContents)
@@ -295,14 +348,14 @@ def fileContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 	Returns: dateTime - datetime
 	
 """
-def fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
+def fileDecContentsReceiver(ciphBlock, connSocket, fname, fsize, request):
 	enc_iv = connSocket.recv()
-	iv = decryptMsg(cipherBlock, enc_iv)
+	iv = decryptMsg(ciphBlock, enc_iv)
 	print(iv)
 	
 
 	#Send OK+size confirmation to client, initiate file exchange
-	requestEnc = encryption(cipherBlock, request)
+	requestEnc = encryption(ciphBlock, request)
 	connSocket.send(requestEnc)
 
 	#Size for receiving file portions
@@ -314,7 +367,7 @@ def fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 	
 	#Receive first file BATCH as response to OK message
 	fileContents = connSocket.recv(bufferSize)
-	#fileContentsDec = decryptData(cipherBlock, fileContents)
+	#fileContentsDec = decryptData(ciphBlock, fileContents)
 	fileWrite(newFname, fileContents)
 	
 	#Continue to receive remaining file contents
@@ -322,7 +375,7 @@ def fileDecContentsReceiver(cipherBlock, connSocket, fname, fsize, request):
 		
 		fileContents = connSocket.recv(bufferSize)
 		#decrypt fileContents
-		#fileContentsDec = decryptData(cipherBlock, fileContents)
+		#fileContentsDec = decryptData(ciphBlock, fileContents)
 		
 		#Track size of received batch for handling
 		contentSize = len(fileContents)
@@ -422,7 +475,12 @@ def getClientPubKey(clientName):
 	
 	return pubClientKey
 
-
+"""
+	This function, encryptionPubicClient(), uses
+	RSA encryption to wrap the session/symmetric key.
+	Parameters: session_key - AES symmetric key, clientName - str
+	Returns: enc_session_key - RSA(AES symmetric key)
+"""
 def encryptionPubicClient(session_key, clientName):
 	pubkey = RSA.import_key(getClientPubKey(clientName))
 	cipher_rsa_en = PKCS1_OAEP.new(pubkey)
@@ -439,23 +497,23 @@ def encryptSymKey(clientName):
 	This function, encryption(), encodes,
 	pads (up to 256 bits), encrypts and
 	returns a message.
-	Parameters: cipherBlock - AES cipher object, msg - str
+	Parameters: ciphBlock - AES cipher object, msg - str
 	Returns: cipherText - 
 """
-def encryption(cipherBlock, msg):
-	cipherText = cipherBlock.encrypt(pad(msg.encode('ascii'),32)) #Note 32: key len/divisible by is 256
+def encryption(ciphBlock, msg):
+	cipherText = ciphBlock.encrypt(pad(msg.encode('ascii'),32)) #Note 32: key len/divisible by is 256
 	return cipherText
 
 """
 	This function, decryptionInit(), prints messages
 	before and after decryption. Used initially to 
 	determine the client's user name.
-	Parameters: cipherBlock - cipher AES, encryptMsg - 
+	Parameters: ciphBlock - cipher AES, encryptMsg - 
 	Returns: decodedMsg - str
 """
-def decryptionInit(cipherBlock, encryptMsg):
+def decryptionInit(ciphBlock, encryptMsg):
 	print('Encrypted message received: ', encryptMsg)
-	pMsg       = decryptMsg(cipherBlock, encryptMsg)
+	pMsg       = decryptMsg(ciphBlock, encryptMsg)
 	decodedMsg = removePadding(pMsg)
 	print('Decrypted message received: ', decodedMsg)
 	return decodedMsg
@@ -464,23 +522,23 @@ def decryptionInit(cipherBlock, encryptMsg):
 	This function, decryptionUser(), prints messages
 	before and after decryption. Used once 
 	a client is identified.
-	Parameters: user - str, cipherBlock - cipher AES, encryptMsg - 
+	Parameters: user - str, ciphBlock - cipher AES, encryptMsg - 
 	Returns: decodedMsg - str
 """
-def decryptionUser(user, cipherBlock, encryptMsg):
+def decryptionUser(user, ciphBlock, encryptMsg):
 	print('Encrypted message from', user + ':', encryptMsg)
-	pMsg       = decryptMsg(cipherBlock, encryptMsg)
+	pMsg       = decryptMsg(ciphBlock, encryptMsg)
 	decodedMsg = removePadding(pMsg)
 	print('Decrypted message from', user + ':', decodedMsg)
 	return decodedMsg
 
 """
 	This function, decryptMsg(), decrypts a message.
-	Parameters: cipherBlock - AES cipher object, encryptMsg - 
+	Parameters: ciphBlock - AES cipher object, encryptMsg - 
 	Returns: paddedMsg - ascii 
 """
-def decryptMsg(cipherBlock, encryptMsg):
-	paddedMsg = cipherBlock.decrypt(encryptMsg)
+def decryptMsg(ciphBlock, encryptMsg):
+	paddedMsg = ciphBlock.decrypt(encryptMsg)
 	return paddedMsg
 
 """
@@ -494,12 +552,12 @@ def removePadding(paddedMsg):
 	message    = encodedMsg.decode('ascii')
 	return message
 
-def decryptData(cipherBlock, encryptedData):
-	data = unpad(cipherBlock.decrypt(encryptedData), 32)
+def decryptData(ciphBlock, encryptedData):
+	data = unpad(ciphBlock.decrypt(encryptedData), 32)
 	print(data)
 	return data
 '''
-	paddedData = cipherBlock.decrypt(encryptedData)
+	paddedData = ciphBlock.decrypt(encryptedData)
 	print(paddedData, '\n\n')
 	data = unpad(paddedData, 32) #Note 32: key len/divisible by is 256
 	print(data)
@@ -526,23 +584,22 @@ def promptSender(connSocket, msg):
 	
 	return receipt
 
-
 """
 	This function, msgExchanger(), encrypts a message
 	and sends it to a client. Then it receives the client's
 	response, decrypts their message and returns it.
 	This is used when a client identity is unknown.
-	Parameters: message - str, cipherBlock - AES cipher object, connectionSocket - socket
+	Parameters: message - str, ciphBlock - AES cipher object, connSocket - socket
 	Returns: clientResponse - str
 """
-def msgExchanger(message, cipherBlock, connectionSocket):
+def msgExchanger(message, ciphBlock, connSocket):
 	#Server encrypts and sends message to a client
-	messageEncrypted = encryption(cipherBlock, message)
-	connectionSocket.send(messageEncrypted)
+	messageEncrypted = encryption(ciphBlock, message)
+	connSocket.send(messageEncrypted)
 	
 	#Receive client's response and decrypts it
-	clientResponseEncrypted = connectionSocket.recv(2048)
-	clientResponse = decryptionInit(cipherBlock, clientResponseEncrypted)
+	clientResponseEncrypted = connSocket.recv(2048)
+	clientResponse = decryptionInit(ciphBlock, clientResponseEncrypted)
 	
 	return clientResponse
 
@@ -551,17 +608,17 @@ def msgExchanger(message, cipherBlock, connectionSocket):
 	and sends it to a client. Then it receives the client's
 	response, decrypts their message and returns it.
 	This function is used when a client identity is KNOWN.
-	Parameters: user - str, message - str, cipherBlock - AES cipher object, connectionSocket - socket
+	Parameters: user - str, message - str, ciphBlock - AES cipher object, connSocket - socket
 	Returns: clientResponse - str
 """
-def msgExchangerUser(user, message, cipherBlock, connectionSocket):
+def msgExchangerUser(user, message, ciphBlock, connSocket):
 	#Server encrypts and sends message to a KNOWN client
-	messageEncrypted = encryption(cipherBlock, message)
-	connectionSocket.send(messageEncrypted)
+	messageEncrypted = encryption(ciphBlock, message)
+	connSocket.send(messageEncrypted)
 	
 	#Receive client's response and decrypts it
-	clientResponseEncrypted = connectionSocket.recv(2048)
-	clientResponse = decryptionUser(user, cipherBlock, clientResponseEncrypted)
+	clientResponseEncrypted = connSocket.recv(2048)
+	clientResponse = decryptionUser(user, ciphBlock, clientResponseEncrypted)
 	
 	return clientResponse
 

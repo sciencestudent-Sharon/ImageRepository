@@ -1,6 +1,6 @@
 """
 
-Uses Fork to Connect to Multiple Clients
+Uses Socket Programming to Connect to Server.py
 Uses AES (ECB Mode) for Encryption/Decryption
 
 Reference: Computer Networking: A Top Down Approach Chapter 2
@@ -24,7 +24,7 @@ from Crypto.Cipher import PKCS1_OAEP
 
 """
 	This function, client() establishes an encryption
-	environment & a socket used to communicate with server. 
+	environment & a socket is used to communicate with server. 
 	Parameters: None
 	Returns: None
 """
@@ -50,7 +50,7 @@ def client():
 		#Handle verification from server
 		verificationMsg = clientSocket.recv(2048)
 		
-		#Determine if the verification from the server is key or login-failed str
+		#Determine if the verification message from the server is key or login-failed str
 		verificationMessage = ""
 		try:
 			verificationMessage = verificationMsg.decode('ascii')
@@ -77,7 +77,7 @@ def client():
 			if (choice == "1"):
 				
 				#Get upload menu, handle user upload choices & file upload
-				uploadMenu, uploadChoice = getUploadMenuChoice(clientSocket, cipherBlock)
+				uploadMenu, uploadChoice = getMenuChoice(clientSocket, cipherBlock)
 				uploadChoice = handleUploadMenu(key, clientSocket, cipherBlock, uploadMenu, uploadChoice)
 				
 				#In uploadmenu: Handle user choice to terminate connection
@@ -103,7 +103,7 @@ def client():
 #=========================================================================================================#
 # MENU - FUNCTIONS
 #=========================================================================================================#
-		
+
 def getMenuChoice(clientSocket, cipherBlock):
 	menu = clientSocket.recv(2048)
 	menuDec = decryption(cipherBlock, menu)
@@ -120,28 +120,19 @@ def getMenuChoiceShort(clientSocket, cipherBlock, menu):
 	clientSocket.send(choiceEnc)
 	return choice
 
-def getUploadMenuChoice(clientSocket, cipherBlock):		
-	uploadMenu = clientSocket.recv(2048)
-	uploadMenuDec = decryption(cipherBlock, uploadMenu)
-	
-	uploadChoice = input(uploadMenuDec)
-	uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
-	clientSocket.send(uploadChoiceEnc)
-	return (uploadMenuDec, uploadChoice)
-
-
-def getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu):
-	uploadChoice = input(uploadMenu)
-	uploadChoiceEnc = encryptMsg(cipherBlock, uploadChoice)
-	clientSocket.send(uploadChoiceEnc)
-	return uploadChoice
-
-
+"""
+	This function, handleUploadMenu(), prompts
+	client with the upload menu and processes 
+	client choices.
+	Parameters: key - AES symmetric key, clientSocket - socket, 
+	cipherBlock - cipher, uploadMenu - str, uploadChoice - str
+	Returns: uploadChoice - str
+"""
 def handleUploadMenu(key, clientSocket, cipherBlock, uploadMenu, uploadChoice):	
 	
-	while (uploadChoice != "3"):
+	while (uploadChoice != "2"):
 	
-		if (uploadChoice == "1"):
+		if (uploadChoice == "1"): #Upload one file
 			
 			#Obtain file info
 			fileInfo = sendFileInfo(clientSocket, cipherBlock)
@@ -158,14 +149,13 @@ def handleUploadMenu(key, clientSocket, cipherBlock, uploadMenu, uploadChoice):
 			else:
 				print('Upload process could not be completed.')
 			
-			uploadChoice = getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)	
+			uploadChoice = getMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)	
 			
-		elif (uploadChoice == "4"):
-			#clientSocket.close()
+		elif (uploadChoice == "3"): #Return to main menu
 			return uploadChoice
 			
 		else:
-			uploadChoice = getUploadMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)
+			uploadChoice = getMenuChoiceShort(clientSocket, cipherBlock, uploadMenu)
 	
 	return uploadChoice
 
@@ -193,7 +183,13 @@ def setUpAES(key):
 def genBlock(key):
 	return AES.new(key, AES.MODE_ECB)
 
-
+"""
+	This function, sendUserInfo(), optains username
+	and password from client, encrypts this information
+	and sends it to the server.
+	Parameters: welcomeMsg - str, clientSocket - socket 
+	Returns: username - str
+"""
 def sendUserInfo(welcomeMsg, clientSocket):
 	username = input(welcomeMsg + "\nUsername: ")
 	password = input("Password: ")
@@ -204,6 +200,13 @@ def sendUserInfo(welcomeMsg, clientSocket):
 	clientSocket.send(loginInfoEnc)
 	return username
 
+"""
+	This function, createEncEnviro(), creates a cipher block
+	and sends a confirmation message to server that key 
+	has been received.
+	Parameters: clientSocket - socket, key - AES symmetric key
+	Returns: cipherBlock - cipher
+"""
 def createEncEnviro(clientSocket, key):
 	cipherBlock = setUpAES(key)
 	confirm = "OK"
@@ -293,50 +296,6 @@ def sendFileContents(key, cipherBlock, clientSocket, fname, fileSize):
 	
 	return None
 
-
-"""
-	This function, sendFileContents(), sends
-	file contents while it's not entirely sent.
-	Parameters: 
-	Returns: None
-	
-"""
-def sendEncFileContents(cipherBlock, clientSocket, fname, fileSize):
-	#ciipher object & enc data
-	cipher_enc = AES.new(key, AES.MODE_CFB)
-	#send the iv
-	enc_iv = encryptMsg(cipherBlock, cipher_enc.iv)
-	clientSocket.send(enc_iv)
-	print(cipher_enc.iv)
-	
-	
-	#Assign buffer size for transferring
-	bufferSize = 2048
-
-	#When OK is received, initiate transfer
-	ok = clientSocket.recv(2048)
-	okDec = decryption(cipherBlock, ok)
-	
-	print(okDec)
-	
-	if 'OK' in okDec:
-	
-		with open(fname, "rb") as f:
-			
-			#Continue to read file in binary, send to server
-			while True:
-				
-				fileContents = f.read(bufferSize)
-				if not fileContents:
-					break
-				else:
-					#fileContentsEnc = encryptData(cipherBlock, b64Str)
-					clientSocket.send(fileContents)
-		f.close()
-	
-	return None
-
-
 ###################################################################################################
 #RSA Encryption/Decryption Functions
 ###################################################################################################
@@ -344,6 +303,7 @@ def sendEncFileContents(cipherBlock, clientSocket, fname, fileSize):
 def fileHandler(fname):
 	keyFile = open(fname, "rb")
 	content = keyFile.read()
+	keyFile.close()
 	return content
 	
 def getPubKey():
@@ -361,9 +321,7 @@ def symKeyToFile(SymKey):
 	keyFile = open("server_symKey.pem", "wb")
 	keyFile.write(SymKey)
 	keyFile.close()
-	
-	
-#before 
+	 
 def decryptSymKey(clientName, key):
 	private_key = fileHandler(clientName + "_private.pem")
 	private_key = RSA.import_key(private_key)
@@ -371,7 +329,6 @@ def decryptSymKey(clientName, key):
 	session_key = cipher_rsa.decrypt(key)
 	
 	return session_key
-
 
 
 ###################################################################################################
@@ -400,9 +357,7 @@ def encryptMsg(cipherBlock, msg):
 """
 def encryptData(cipherBlock, data):
 	cipherText = cipherBlock.encrypt(pad(data, 32)) #Note 32: key len/divisible by 256
-	#print('Cipher text/encrypted message: ', cipherText)
 	return cipherText
-
 
 
 """

@@ -82,11 +82,7 @@ def showKeys():
 		if client == "client1" or client == "client2":
 			shutil.copyfile(path + "/server_public.pem", path + "/Client" + "/server_public.pem")
 			shutil.copyfile(newPath + "/" + fnPrivKey, path + "/Client/" + fnPrivKey)	
-
-
-
-
-		
+	
 #------
 showKeys()
 
